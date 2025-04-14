@@ -1,4 +1,4 @@
-import logging
+from config.logging import setup_logger
 import os
 import hashlib
 import sqlite3
@@ -21,17 +21,26 @@ from openai import OpenAI
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 
-load_dotenv()
-logging.basicConfig(level=logging.INFO)
+# Настройка логирования
+logger = setup_logger()
+
+# Загрузка переменных окружения
+try:
+    load_dotenv()
+    logger.info("Environment variables loaded successfully")
+except Exception as e:
+    logger.error(f"Error loading environment variables: {str(e)}")
+    raise
 
 # Configuration
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
 ADMIN_ID = int(os.getenv('ADMIN_ID'))  # Ensure ADMIN_ID is an integer
 SUPER_ADMIN_ID = int(os.getenv('SUPER_ADMIN_ID', ADMIN_ID))  # Add super admin ID
 TELEGRAM_API_TOKEN = os.getenv('TELEGRAM_API_TOKEN')
 TELEGRAM_TARGET_CHANNEL_ID = os.getenv('TELEGRAM_TARGET_CHANNEL_ID')
 DATABASE_NAME = "rss_feeds.db"
-client = OpenAI(api_key=OPENAI_API_KEY)
+client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com/v1")
 ssl_context = ssl.create_default_context(cafile=certifi.where())
 system_prompt = """\
     You are an IT content writer for a Telegram channel. Transform the provided information into a structured post using this template:
@@ -269,10 +278,10 @@ async def parse_rss_feed(feed_url: str) -> Tuple[str, str, str]:
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
 async def get_gpt_response(input_data: str) -> str:
-    """Generate response using OpenAI GPT-4"""
+    """Generate response using Deepseek"""
     try:
         response = client.chat.completions.create(
-            model="gpt-4-turbo",
+            model="deepseek-chat",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": input_data}
@@ -282,7 +291,7 @@ async def get_gpt_response(input_data: str) -> str:
         )
         return response.choices[0].message.content
     except Exception as e:
-        logging.error(f"GPT API error: {str(e)}")
+        logger.error(f"GPT API error: {str(e)}")
         raise
 
 async def monitor_feed(feed_url: str, interval: int):
@@ -297,7 +306,7 @@ async def monitor_feed(feed_url: str, interval: int):
                 
                 await bot.send_message(TELEGRAM_TARGET_CHANNEL_ID, text=gpt_response)
         except Exception as e:
-            logging.error(f"Error monitoring {feed_url}: {str(e)}")
+            logger.error(f"Error monitoring {feed_url}: {str(e)}")
         
         await asyncio.sleep(interval)
 
@@ -321,7 +330,7 @@ async def set_prompt_handler(message: types.Message):
         await message.reply("✅ Prompt template updated successfully")
         
     except Exception as e:
-        logging.error(f"Error setting prompt: {str(e)}")
+        logger.error(f"Error setting prompt: {str(e)}")
         await message.reply(f"❌ Error: {str(e)}")
 
 # New admin management handlers
@@ -443,7 +452,7 @@ async def debug_get_feed_handler(message: types.Message):
         await message.reply(content)
         
     except Exception as e:
-        logging.error(f"Debug feed error: {str(e)}")
+        logger.error(f"Debug feed error: {str(e)}")
         await message.reply(f"❌ Error fetching feed: {str(e)}")
 
 @dp.message_handler(commands=['send_seen_to_target'])
@@ -498,7 +507,7 @@ async def send_seen_to_target_handler(message: types.Message):
         await message.reply("✅ Post sent to target channel!")
         
     except Exception as e:
-        logging.error(f"Error sending post to target: {str(e)}")
+        logger.error(f"Error sending post to target: {str(e)}")
         await message.reply(f"❌ Error: {str(e)}")
 
 @dp.message_handler(commands=['debug_send_to_target'])
@@ -540,7 +549,7 @@ async def debug_send_to_target_handler(message: types.Message, state: FSMContext
         
         
     except Exception as e:
-        logging.error(f"Debug feed error: {str(e)}")
+        logger.error(f"Debug feed error: {str(e)}")
         await message.reply(f"❌ Error fetching feed: {str(e)}")
 
 @dp.message_handler(commands=['get_seen_posts'])
@@ -655,7 +664,7 @@ async def get_active_feeds_handler(message: types.Message):
         await message.reply(response)
 
     except Exception as e:
-        logging.error(f"Error fetching active feeds: {str(e)}")
+        logger.error(f"Error fetching active feeds: {str(e)}")
         await message.reply(f"❌ Error fetching active feeds: {str(e)}")
 
 @dp.message_handler(state=DebugFeedStates.waiting_for_confirmation)
@@ -683,7 +692,7 @@ async def handle_confirmation(message: types.Message, state: FSMContext):
         await state.finish()
         
     except Exception as e:
-        logging.error(f"Confirmation handler error: {str(e)}")
+        logger.error(f"Confirmation handler error: {str(e)}")
         await message.reply(f"❌ Error: {str(e)}")
         await state.finish()
 
