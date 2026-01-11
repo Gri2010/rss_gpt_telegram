@@ -14,7 +14,7 @@ FEEDS = [
     "https://www.fiercebiotech.com/rss"
 ]
 
-# 2. ПОДКЛЮЧЕНИЕ К GEMINI (Новый способ)
+# 2. ПОДКЛЮЧЕНИЕ К GEMINI (максимально простое)
 client = genai.Client(api_key=GEMINI_KEY)
 
 def run_bot():
@@ -30,10 +30,11 @@ def run_bot():
             if entry.link not in posted:
                 print(f"Новость найдена: {entry.title}")
                 
-                prompt = f"Ты научный журналист. Переведи новость на русский, сделай краткое резюме (3 предложения) и добавь эмодзи. Хэштеги: #биотех #наука. Текст: {entry.title} - {entry.description}"
+                # Текст для нейронки
+                prompt = f"Переведи на русский и сделай краткое резюме: {entry.title}. Добавь хэштеги #биотех #наука"
                 
                 try:
-                    # Новый формат вызова модели
+                    # Пробуем вызвать модель БЕЗ лишних путей, просто по имени
                     response = client.models.generate_content(
                         model="gemini-1.5-flash", 
                         contents=prompt
@@ -41,7 +42,16 @@ def run_bot():
                     text = response.text
                 except Exception as e:
                     print(f"Ошибка Gemini: {e}")
-                    continue
+                    # Если опять 404, пробуем альтернативное имя модели
+                    try:
+                        response = client.models.generate_content(
+                            model="gemini-1.5-pro", 
+                            contents=prompt
+                        )
+                        text = response.text
+                    except Exception as e2:
+                        print(f"Ошибка даже с PRO: {e2}")
+                        continue
 
                 final_post = f"{text}\n\n🔗 Источник: {entry.link}"
                 
