@@ -1,25 +1,24 @@
 import os
 import feedparser
 import requests
-from openai import OpenAI
+import google.generativeai as genai
 
-# 1. ЗАГРУЗКА НАСТРОЕК
+# 1. НАСТРОЙКИ
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHANNEL_ID = os.getenv('CHANNEL_ID')
-DEEPSEEK_KEY = os.getenv('DEEPSEEK_KEY')
+GEMINI_KEY = os.getenv('GEMINI_API_KEY')
 
-# 2. ИСТОЧНИКИ НОВОСТЕЙ
 FEEDS = [
     "https://www.sciencedaily.com/rss/matter_energy/biotechnology.xml",
     "https://www.nature.com/nbt.rss",
     "https://www.fiercebiotech.com/rss"
 ]
 
-# 3. ПОДКЛЮЧЕНИЕ К НЕЙРОСЕТИ
-client = OpenAI(api_key=DEEPSEEK_KEY, base_url="https://api.deepseek.com/v1")
+# 2. ПОДКЛЮЧЕНИЕ К GEMINI
+genai.configure(api_key=GEMINI_KEY)
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 def run_bot():
-    # Загружаем список уже опубликованных ссылок из файла
     if os.path.exists('posted_links.txt'):
         with open('posted_links.txt', 'r') as f:
             posted = f.read().splitlines()
@@ -28,32 +27,31 @@ def run_bot():
 
     for url in FEEDS:
         feed = feedparser.parse(url)
-        for entry in feed.entries[:5]: # Проверяем 5 последних новостей
+        for entry in feed.entries[:5]:
             if entry.link not in posted:
-                print(f"Обрабатываю: {entry.title}")
+                print(f"Новость найдена: {entry.title}")
                 
-                # Перевод и саммари через Deepseek
-                response = client.chat.completions.create(
-                    model="deepseek-chat",
-                    messages=[
-                        {"role": "system", "content": "Ты научный журналист. Переведи новость на русский, сделай краткое саммари и добавь эмодзи. Хэштеги: #биотех #наука"},
-                        {"role": "user", "content": f"{entry.title}\n\n{entry.description}"}
-                    ]
-                )
+                # Запрос к Gemini
+                prompt = f"Ты научный обозреватель. Переведи эту новость на русский язык, сделай краткое резюме (3 предложения) и добавь подходящие эмодзи. Используй хэштеги #биотех #наука. Текст новости: {entry.title} - {entry.description}"
                 
-                text = response.choices[0].message.content
-                final_post = f"{text}\n\n🔗 {entry.link}"
+                try:
+                    response = model.generate_content(prompt)
+                    text = response.text
+                except Exception as e:
+                    print(f"Ошибка Gemini: {e}")
+                    continue
+
+                final_post = f"{text}\n\n🔗 Источник: {entry.link}"
                 
                 # Отправка в Telegram
                 send_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-                requests.post(send_url, data={"chat_id": CHANNEL_ID, "text": final_post})
+                requests.post(send_url, data={"chat_id": CHANNEL_ID, "text": final_post, "parse_mode": "Markdown"})
                 
-                # Записываем ссылку, чтобы не повторяться
                 with open('posted_links.txt', 'a') as f:
                     f.write(entry.link + '\n')
                 
-                print("Пост отправлен!")
-                return # Завершаем работу после одного нового поста за раз
+                print("Опубликовано!")
+                return 
 
 if __name__ == "__main__":
     run_bot()
