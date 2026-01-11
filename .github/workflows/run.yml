@@ -1,0 +1,33 @@
+name: Biotech Automation
+on:
+  schedule:
+    - cron: '0 */4 * * *' # Будет запускаться каждые 4 часа сам
+  workflow_dispatch:      # Позволяет тебе нажать кнопку запуска вручную
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Даем права на запись, чтобы бот мог обновлять файл со ссылками
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install apps
+        run: pip install feedparser google-generativeai requests
+      - name: Run bot
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python main.py
+      - name: Save changes
+        run: |
+          git config --global user.name "Bot"
+          git config --global user.email "bot@github.com"
+          git add posted_links.txt
+          git commit -m "Update links" || exit 0
+          git push
