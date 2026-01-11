@@ -1,31 +1,49 @@
-name: Biotech Automation
+name: Biotech Groq Bot
+
 on:
   schedule:
+    # Запуск каждые 4 часа (00:00, 04:00, 08:00 и т.д.)
     - cron: '0 */4 * * *'
+  # Позволяет запускать бота вручную кнопкой "Run workflow"
   workflow_dispatch:
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Даем разрешение Гитхабу записывать изменения в файл posted_links.txt
     permissions:
       contents: write
+
     steps:
-      - uses: actions/checkout@v4
+      # 1. Скачиваем код из твоего репозитория
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Устанавливаем Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install apps
-        run: pip install feedparser requests # Убрали лишнее
-      - name: Run bot
+
+      # 3. Устанавливаем необходимые библиотеки
+      - name: Install dependencies
+        run: pip install feedparser requests
+
+      # 4. Запускаем бота
+      - name: Run bot script
         env:
+          # Передаем секреты из настроек GitHub в код
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: python main.py
-      - name: Save changes
+
+      # 5. Сохраняем обновленный файл со ссылками обратно в репозиторий
+      - name: Save history
         run: |
-          git config --global user.name "Bot"
-          git config --global user.email "bot@github.com"
+          git config --global user.name "GitHub Action Bot"
+          git config --global user.email "actions@github.com"
           git add posted_links.txt
-          git commit -m "Update links" || exit 0
+          # Коммитим изменения, если они есть. Если новых постов не было — просто идем дальше.
+          git commit -m "Update posted links log" || exit 0
           git push
