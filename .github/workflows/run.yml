@@ -1,21 +1,20 @@
 name: Biotech Automation
 on:
   schedule:
-    - cron: '0 */4 * * *' # Будет запускаться каждые 4 часа сам
-  workflow_dispatch:      # Позволяет тебе нажать кнопку запуска вручную
+    - cron: '0 */4 * * *'
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    # Даем права на запись, чтобы бот мог обновлять файл со ссылками
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4 # Обновили версию
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5 # Обновили версию
         with:
-          python-version: '3.9'
+          python-version: '3.11' # Поставили свежий Python
       - name: Install apps
         run: pip install feedparser google-generativeai requests
       - name: Run bot
