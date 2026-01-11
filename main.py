@@ -14,7 +14,7 @@ FEEDS = [
 ]
 
 def ask_gemini(text):
-    # МЕНЯЕМ v1beta на v1 и убираем лишние префиксы
+    # Пытаемся использовать самый современный путь v1
     url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
     
     payload = {
@@ -27,16 +27,20 @@ def ask_gemini(text):
         response = requests.post(url, json=payload)
         data = response.json()
         
-        # Если всё равно 404, пробуем альтернативный URL
-        if response.status_code == 404:
-            url_alt = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_KEY}"
-            response = requests.post(url_alt, json=payload)
-            data = response.json()
+        # Если ответ успешный (есть текст)
+        if "candidates" in data:
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        
+        # Если 404 или ошибка, пробуем запасной вариант с gemini-pro
+        print(f"Первая попытка не удалась, пробую запасную модель...")
+        url_pro = f"https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key={GEMINI_KEY}"
+        response = requests.post(url_pro, json=payload)
+        data = response.json()
 
         if "candidates" in data:
             return data["candidates"][0]["content"]["parts"][0]["text"]
         else:
-            print(f"Ответ от Google: {data}")
+            print(f"Критическая ошибка Google: {data}")
             return None
     except Exception as e:
         print(f"Ошибка сети: {e}")
@@ -60,15 +64,18 @@ def run_bot():
                 if translated_text:
                     final_post = f"{translated_text}\n\n🔗 {entry.link}"
                     send_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+                    # Отправляем пост
                     res = requests.post(send_url, data={"chat_id": CHANNEL_ID, "text": final_post})
                     
                     if res.status_code == 200:
                         with open('posted_links.txt', 'a') as f:
                             f.write(entry.link + '\n')
-                        print("Опубликовано!")
+                        print("ПОСТ ОПУБЛИКОВАН!")
                         return
                     else:
-                        print(f"Ошибка ТГ: {res.text}")
+                        print(f"Ошибка Телеграм: {res.text}")
+                else:
+                    print("Не удалось получить перевод от Gemini.")
 
 if __name__ == "__main__":
     run_bot()
