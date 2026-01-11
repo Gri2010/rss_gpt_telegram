@@ -10,13 +10,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4 # Обновили версию
+      - uses: actions/checkout@v4
       - name: Set up Python
-        uses: actions/setup-python@v5 # Обновили версию
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11' # Поставили свежий Python
+          python-version: '3.11'
       - name: Install apps
-        run: pip install feedparser google-generativeai requests
+        run: pip install feedparser google-genai requests  # Изменили тут
       - name: Run bot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
