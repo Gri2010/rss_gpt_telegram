@@ -1,23 +1,26 @@
 import os
 import feedparser
 import requests
-from google import genai
+import google.generativeai as genai
 
-# 1. НАСТРОЙКИ
+# 1. НАСТРОЙКИ (берутся из Secrets)
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHANNEL_ID = os.getenv('CHANNEL_ID')
 GEMINI_KEY = os.getenv('GEMINI_API_KEY')
 
+# Ленты новостей
 FEEDS = [
     "https://www.sciencedaily.com/rss/matter_energy/biotechnology.xml",
     "https://www.nature.com/nbt.rss",
     "https://www.fiercebiotech.com/rss"
 ]
 
-# 2. ПОДКЛЮЧЕНИЕ К GEMINI (максимально простое)
-client = genai.Client(api_key=GEMINI_KEY)
+# 2. ПОДКЛЮЧЕНИЕ К GEMINI
+genai.configure(api_key=GEMINI_KEY)
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 def run_bot():
+    # Проверка списка уже опубликованных ссылок
     if os.path.exists('posted_links.txt'):
         with open('posted_links.txt', 'r') as f:
             posted = f.read().splitlines()
@@ -28,30 +31,18 @@ def run_bot():
         feed = feedparser.parse(url)
         for entry in feed.entries[:5]:
             if entry.link not in posted:
-                print(f"Новость найдена: {entry.title}")
+                print(f"Обработка: {entry.title}")
                 
-                # Текст для нейронки
-                prompt = f"Переведи на русский и сделай краткое резюме: {entry.title}. Добавь хэштеги #биотех #наука"
+                prompt = f"Ты научный журналист. Переведи на русский, сделай саммари (3 предложения) и добавь эмодзи. Хэштеги: #биотех #наука. Текст: {entry.title}"
                 
                 try:
-                    # Пробуем вызвать модель БЕЗ лишних путей, просто по имени
-                    response = client.models.generate_content(
-                        model="gemini-1.5-flash", 
-                        contents=prompt
-                    )
+                    response = model.generate_content(prompt)
+                    if not response.text:
+                        continue
                     text = response.text
                 except Exception as e:
                     print(f"Ошибка Gemini: {e}")
-                    # Если опять 404, пробуем альтернативное имя модели
-                    try:
-                        response = client.models.generate_content(
-                            model="gemini-1.5-pro", 
-                            contents=prompt
-                        )
-                        text = response.text
-                    except Exception as e2:
-                        print(f"Ошибка даже с PRO: {e2}")
-                        continue
+                    continue
 
                 final_post = f"{text}\n\n🔗 Источник: {entry.link}"
                 
@@ -62,10 +53,10 @@ def run_bot():
                 if r.status_code == 200:
                     with open('posted_links.txt', 'a') as f:
                         f.write(entry.link + '\n')
-                    print("Опубликовано!")
-                    return 
+                    print("Успех! Пост в канале.")
+                    return # Постим по одной за раз
                 else:
-                    print(f"Ошибка Телеграм: {r.text}")
+                    print(f"Ошибка ТГ: {r.text}")
 
 if __name__ == "__main__":
     run_bot()
