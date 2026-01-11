@@ -1,7 +1,7 @@
 import os
 import feedparser
 import requests
-import google.generativeai as genai
+from google import genai
 
 # 1. НАСТРОЙКИ
 TOKEN = os.getenv('TELEGRAM_TOKEN')
@@ -14,11 +14,8 @@ FEEDS = [
     "https://www.fiercebiotech.com/rss"
 ]
 
-# 2. ПОДКЛЮЧЕНИЕ К GEMINI
-genai.configure(api_key=GEMINI_KEY)
-
-# Пробуем модель gemini-pro (она самая универсальная для старых библиотек)
-model = genai.GenerativeModel('gemini-pro')
+# 2. ПОДКЛЮЧЕНИЕ К GEMINI (Новый способ)
+client = genai.Client(api_key=GEMINI_KEY)
 
 def run_bot():
     if os.path.exists('posted_links.txt'):
@@ -29,36 +26,28 @@ def run_bot():
 
     for url in FEEDS:
         feed = feedparser.parse(url)
-        if not feed.entries:
-            continue
-            
         for entry in feed.entries[:5]:
             if entry.link not in posted:
                 print(f"Новость найдена: {entry.title}")
                 
-                prompt = f"Ты научный журналист. Переведи новость на русский, сделай саммари (3 предложения) и добавь эмодзи. Хэштеги: #биотех #наука. Текст: {entry.title}"
+                prompt = f"Ты научный журналист. Переведи новость на русский, сделай краткое резюме (3 предложения) и добавь эмодзи. Хэштеги: #биотех #наука. Текст: {entry.title} - {entry.description}"
                 
                 try:
-                    # Пытаемся сгенерировать текст
-                    response = model.generate_content(prompt)
+                    # Новый формат вызова модели
+                    response = client.models.generate_content(
+                        model="gemini-1.5-flash", 
+                        contents=prompt
+                    )
                     text = response.text
                 except Exception as e:
-                    print(f"Ошибка Gemini (модель pro): {e}")
-                    # Если не вышло, пробуем еще раз с 1.5-flash без лишних слов
-                    try:
-                        temp_model = genai.GenerativeModel('gemini-1.5-flash')
-                        response = temp_model.generate_content(prompt)
-                        text = response.text
-                    except Exception as e2:
-                        print(f"Ошибка Gemini (модель flash): {e2}")
-                        continue
+                    print(f"Ошибка Gemini: {e}")
+                    continue
 
                 final_post = f"{text}\n\n🔗 Источник: {entry.link}"
                 
                 # Отправка в Telegram
                 send_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-                payload = {"chat_id": CHANNEL_ID, "text": final_post}
-                r = requests.post(send_url, data=payload)
+                r = requests.post(send_url, data={"chat_id": CHANNEL_ID, "text": final_post})
                 
                 if r.status_code == 200:
                     with open('posted_links.txt', 'a') as f:
