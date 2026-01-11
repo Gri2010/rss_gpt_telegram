@@ -16,8 +16,9 @@ FEEDS = [
 
 # 2. ПОДКЛЮЧЕНИЕ К GEMINI
 genai.configure(api_key=GEMINI_KEY)
-# Исправленное имя модели
-model = genai.GenerativeModel('models/gemini-1.5-flash-latest')
+
+# Пробуем модель gemini-pro (она самая универсальная для старых библиотек)
+model = genai.GenerativeModel('gemini-pro')
 
 def run_bot():
     if os.path.exists('posted_links.txt'):
@@ -28,28 +29,35 @@ def run_bot():
 
     for url in FEEDS:
         feed = feedparser.parse(url)
+        if not feed.entries:
+            continue
+            
         for entry in feed.entries[:5]:
             if entry.link not in posted:
                 print(f"Новость найдена: {entry.title}")
                 
-                prompt = f"Ты научный обозреватель. Переведи эту новость на русский язык, сделай краткое резюме (3 предложения) и добавь подходящие эмодзи. Используй хэштеги #биотех #наука. Текст новости: {entry.title} - {entry.description}"
+                prompt = f"Ты научный журналист. Переведи новость на русский, сделай саммари (3 предложения) и добавь эмодзи. Хэштеги: #биотех #наука. Текст: {entry.title}"
                 
                 try:
+                    # Пытаемся сгенерировать текст
                     response = model.generate_content(prompt)
-                    # Проверка на наличие текста в ответе
-                    if response.text:
-                        text = response.text
-                    else:
-                        continue
+                    text = response.text
                 except Exception as e:
-                    print(f"Ошибка Gemini: {e}")
-                    continue
+                    print(f"Ошибка Gemini (модель pro): {e}")
+                    # Если не вышло, пробуем еще раз с 1.5-flash без лишних слов
+                    try:
+                        temp_model = genai.GenerativeModel('gemini-1.5-flash')
+                        response = temp_model.generate_content(prompt)
+                        text = response.text
+                    except Exception as e2:
+                        print(f"Ошибка Gemini (модель flash): {e2}")
+                        continue
 
                 final_post = f"{text}\n\n🔗 Источник: {entry.link}"
                 
                 # Отправка в Telegram
                 send_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-                payload = {"chat_id": CHANNEL_ID, "text": final_post, "parse_mode": "Markdown"}
+                payload = {"chat_id": CHANNEL_ID, "text": final_post}
                 r = requests.post(send_url, data=payload)
                 
                 if r.status_code == 200:
