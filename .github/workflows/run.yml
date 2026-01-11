@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install apps
-        run: pip install feedparser google-genai requests  # Изменили тут
+        run: pip install feedparser google-generativeai requests
       - name: Run bot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
