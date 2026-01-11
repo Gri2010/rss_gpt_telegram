@@ -14,8 +14,13 @@ FEEDS = [
 ]
 
 def ask_gemini(text):
-    # Пытаемся использовать самый современный путь v1
-    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
+    # Пытаемся по очереди разные варианты написания модели
+    # Это решает проблему 404 в разных регионах
+    variants = [
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent",
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent",
+        "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent"
+    ]
     
     payload = {
         "contents": [{
@@ -23,28 +28,21 @@ def ask_gemini(text):
         }]
     }
     
-    try:
-        response = requests.post(url, json=payload)
-        data = response.json()
-        
-        # Если ответ успешный (есть текст)
-        if "candidates" in data:
-            return data["candidates"][0]["content"]["parts"][0]["text"]
-        
-        # Если 404 или ошибка, пробуем запасной вариант с gemini-pro
-        print(f"Первая попытка не удалась, пробую запасную модель...")
-        url_pro = f"https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key={GEMINI_KEY}"
-        response = requests.post(url_pro, json=payload)
-        data = response.json()
-
-        if "candidates" in data:
-            return data["candidates"][0]["content"]["parts"][0]["text"]
-        else:
-            print(f"Критическая ошибка Google: {data}")
-            return None
-    except Exception as e:
-        print(f"Ошибка сети: {e}")
-        return None
+    for url in variants:
+        try:
+            full_url = f"{url}?key={GEMINI_KEY}"
+            response = requests.post(full_url, json=payload, timeout=10)
+            data = response.json()
+            
+            if "candidates" in data:
+                return data["candidates"][0]["content"]["parts"][0]["text"]
+            else:
+                print(f"Попытка через {url} не удалась: {data.get('error', {}).get('message', 'Unknown error')}")
+        except Exception as e:
+            print(f"Ошибка сети для {url}: {e}")
+            continue
+            
+    return None
 
 def run_bot():
     if os.path.exists('posted_links.txt'):
@@ -64,18 +62,17 @@ def run_bot():
                 if translated_text:
                     final_post = f"{translated_text}\n\n🔗 {entry.link}"
                     send_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-                    # Отправляем пост
                     res = requests.post(send_url, data={"chat_id": CHANNEL_ID, "text": final_post})
                     
                     if res.status_code == 200:
                         with open('posted_links.txt', 'a') as f:
                             f.write(entry.link + '\n')
-                        print("ПОСТ ОПУБЛИКОВАН!")
+                        print("УСПЕХ! Пост в канале.")
                         return
                     else:
-                        print(f"Ошибка Телеграм: {res.text}")
+                        print(f"Ошибка ТГ: {res.text}")
                 else:
-                    print("Не удалось получить перевод от Gemini.")
+                    print("Ни одна модель Gemini не ответила.")
 
 if __name__ == "__main__":
     run_bot()
