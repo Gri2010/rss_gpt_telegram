@@ -16,7 +16,8 @@ FEEDS = [
 
 # 2. ПОДКЛЮЧЕНИЕ К GEMINI
 genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+# Исправленное имя модели
+model = genai.GenerativeModel('models/gemini-1.5-flash-latest')
 
 def run_bot():
     if os.path.exists('posted_links.txt'):
@@ -31,12 +32,15 @@ def run_bot():
             if entry.link not in posted:
                 print(f"Новость найдена: {entry.title}")
                 
-                # Запрос к Gemini
                 prompt = f"Ты научный обозреватель. Переведи эту новость на русский язык, сделай краткое резюме (3 предложения) и добавь подходящие эмодзи. Используй хэштеги #биотех #наука. Текст новости: {entry.title} - {entry.description}"
                 
                 try:
                     response = model.generate_content(prompt)
-                    text = response.text
+                    # Проверка на наличие текста в ответе
+                    if response.text:
+                        text = response.text
+                    else:
+                        continue
                 except Exception as e:
                     print(f"Ошибка Gemini: {e}")
                     continue
@@ -45,13 +49,16 @@ def run_bot():
                 
                 # Отправка в Telegram
                 send_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-                requests.post(send_url, data={"chat_id": CHANNEL_ID, "text": final_post, "parse_mode": "Markdown"})
+                payload = {"chat_id": CHANNEL_ID, "text": final_post, "parse_mode": "Markdown"}
+                r = requests.post(send_url, data=payload)
                 
-                with open('posted_links.txt', 'a') as f:
-                    f.write(entry.link + '\n')
-                
-                print("Опубликовано!")
-                return 
+                if r.status_code == 200:
+                    with open('posted_links.txt', 'a') as f:
+                        f.write(entry.link + '\n')
+                    print("Опубликовано!")
+                    return 
+                else:
+                    print(f"Ошибка Телеграм: {r.text}")
 
 if __name__ == "__main__":
     run_bot()
