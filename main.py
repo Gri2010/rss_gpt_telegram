@@ -21,27 +21,29 @@ async def work_with_florisoft():
         page = await context.new_page()
         
         try:
-            logger.info("Вход...")
+            logger.info("Вход в систему...")
             await page.goto("https://www.flowersale.nl/", wait_until="networkidle")
             await page.get_by_text("Login Webshop").first.click()
             await page.wait_for_selector('input[placeholder*="Gebruiker"]')
             await page.fill('input[placeholder*="Gebruiker"]', str(FLORI_USER))
             await page.fill('input[placeholder*="Wachtwoord"]', str(FLORI_PASS))
             await page.click('button:has-text("INLOGGEN")')
-            await asyncio.sleep(10)
+            await asyncio.sleep(12)
             await page.keyboard.press("Enter") 
             await asyncio.sleep(5)
 
-            logger.info("Раздел Planten...")
+            logger.info("Переход в Planten...")
             await page.goto("https://flosal.florisoft-cloud.com/Voorraad/PLANT_/PLANT/TP148")
-            await page.wait_for_selector('tr', timeout=30000)
-            await asyncio.sleep(10)
+            
+            # Вместо строгого ожидания просто даем Blazor 15 секунд прогрузить таблицу
+            await asyncio.sleep(15) 
 
-            # ЧАСТЬ 1: Сбор товаров для постов
+            # --- ЧАСТЬ 1: СБОР ДАННЫХ ДЛЯ ПОСТОВ ---
+            logger.info("Собираю данные для постов...")
             products = await page.evaluate('''() => {
                 const results = [];
                 const rows = Array.from(document.querySelectorAll('tr')).filter(r => r.innerText.includes('€'));
-                rows.slice(0, 30).forEach(row => {
+                rows.slice(0, 20).forEach(row => {
                     const cells = row.querySelectorAll('td');
                     if (cells.length >= 5) {
                         results.push({
@@ -55,63 +57,50 @@ async def work_with_florisoft():
                 });
                 return results;
             }''')
+            
+            logger.info(f"Собрано для постов: {len(products)}")
 
-            # ЧАСТЬ 2: Клик по принтеру (сначала пробуем найти его координаты)
-            logger.info("Скачиваю прайс...")
+            # --- ЧАСТЬ 2: РАБОТА С ПРИНТЕРОМ И ВТОРЫМ ОКНОМ ---
+            logger.info("Жму на принтер и ищу второе окно...")
+            price_path = None
             try:
+                # 1. Жмем на принтер на зеленой полосе
+                await page.locator('.fa-print').first.click()
+                await asyncio.sleep(5) # Ждем появления второго окна
+
+                # 2. Ловим скачивание и жмем на ЛЮБУЮ кнопку во втором окне (Download/OK/Export)
                 async with page.expect_download(timeout=60000) as download_info:
-                    # Ищем иконку принтера на зеленой полосе
-                    printer = page.locator('.fa-print').first
-                    await printer.scroll_into_view_if_needed()
-                    # Кликаем принудительно через JS для надежности
-                    await printer.evaluate("el => el.click()")
-                
+                    await page.evaluate('''() => {
+                        // Ищем кнопки, которые часто бывают в поп-апах экспорта
+                        const selectors = ['button:not([disabled])', 'a.btn', '.modal-footer button'];
+                        for (let s of selectors) {
+                            const elements = document.querySelectorAll(s);
+                            for (let el of elements) {
+                                if (/Download|OK|Export|Print|Скачать|Принять/i.test(el.innerText)) {
+                                    el.click();
+                                    return;
+                                }
+                            }
+                        }
+                    }''')
                 download = await download_info.value
                 price_path = f"./{download.suggested_filename}"
                 await download.save_as(price_path)
+                logger.info("Файл скачан успешно!")
             except Exception as e:
-                logger.warning(f"Принтер не поддался: {e}. Попробуем постить только товары.")
-                price_path = None
+                logger.warning(f"Не удалось скачать файл через второе окно: {e}")
+                # Делаем скриншот этого второго окна для диагностики
+                await page.screenshot(path="popup_debug.png")
+                with open("popup_debug.png", "rb") as f:
+                    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendPhoto", 
+                                  data={"chat_id": CHANNEL_ID, "caption": "Вась, посмотри на это окно. Что тут нажать?"}, files={"photo": f})
 
             await browser.close()
             return products, price_path
 
         except Exception as e:
-            logger.error(f"Ошибка: {e}")
+            logger.error(f"Критическая ошибка: {e}")
             await browser.close()
             return [], None
 
-def generate_pitch(item):
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"}
-    prompt = f"Напиши очень коротко и по-деловому: {item['name']}, горшок {item['size']}, цена {item['price']}. Используй HTML <b>."
-    try:
-        res = requests.post(url, json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}]}, headers=headers, timeout=15)
-        return res.json()['choices'][0]['message']['content']
-    except:
-        return f"🌿 <b>{item['name']}</b> ({item['size']}) — {item['price']}"
-
-async def main():
-    items, price_file = await work_with_florisoft()
-    
-    # Сначала шлем посты
-    if items:
-        hot_deals = random.sample(items, min(len(items), 5))
-        for item in hot_deals:
-            pitch = generate_pitch(item)
-            caption = f"🔥 <b>ПОСТУПЛЕНИЕ</b>\n\n{pitch}\n\n📦 Склад: {item['stock']} шт."
-            if item['photo'] and 'http' in item['photo']:
-                requests.post(f"https://api.telegram.org/bot{TOKEN}/sendPhoto", json={"chat_id": CHANNEL_ID, "photo": item['photo'], "caption": caption, "parse_mode": "HTML"})
-            else:
-                requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHANNEL_ID, "text": caption, "parse_mode": "HTML"})
-            await asyncio.sleep(3)
-
-    # В конце шлем файл
-    if price_file:
-        with open(price_file, "rb") as f:
-            requests.post(f"https://api.telegram.org/bot{TOKEN}/sendDocument", 
-                          data={"chat_id": CHANNEL_ID, "caption": "📄 Полный прайс (Planten)"}, files={"document": f})
-        os.remove(price_file)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+# Функции generate_pitch и main остаются те же (убедись, что они в конце файла)
