@@ -1,9 +1,9 @@
-name: Hourly Plant Post
+name: Kew Botanical Post
 
 on:
   schedule:
-    - cron: '0 * * * *' # Запуск каждый час (в 00 минут)
-  workflow_dispatch:      # Кнопка для ручного запуска
+    - cron: '0 * * * *' # Запуск каждый час
+  workflow_dispatch:      # Кнопка ручного запуска
 
 jobs:
   build:
@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests groq
+          pip install requests groq pykew
 
       - name: Run bot
         env:
