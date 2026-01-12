@@ -25,18 +25,26 @@ async def get_full_stock():
         try:
             logger.info("Авторизация во Florisoft...")
             await page.goto("https://flosal.florisoft-cloud.com/login", wait_until="networkidle")
-            await page.fill('input[type="email"], input[name*="user"]', FLORI_USER)
-            await page.fill('input[type="password"]', FLORI_PASS)
-            await page.click('button[type="submit"]')
+            
+            # Находим поля ввода более универсально
+            await page.wait_for_selector('input[type="password"]', timeout=20000)
+            
+            # Исправленный блок ввода данных
+            await page.fill('input[type="email"], input[name*="user"], input[name*="login"]', str(FLORI_USER))
+            await page.fill('input[type="password"]', str(FLORI_PASS))
+            
+            await page.click('button[type="submit"], .btn-primary, input[type="submit"]')
             await page.wait_for_load_state("networkidle")
             
+            # Переход к прайсу
+            logger.info("Перехожу к прайсу...")
             await page.goto("https://flosal.florisoft-cloud.com/Voorraad/PLANT_/PLANT/TP148", wait_until="networkidle")
             await page.wait_for_selector("table", timeout=30000)
 
             logger.info("Сканирование полного прайса...")
-            for _ in range(20): # Глубокая прокрутка для всех позиций
+            for _ in range(15): 
                 await page.mouse.wheel(0, 3000)
-                await asyncio.sleep(1)
+                await asyncio.sleep(1.5)
 
             products = await page.evaluate('''() => {
                 const results = [];
@@ -58,7 +66,6 @@ async def get_full_stock():
             }''')
             await browser.close()
             
-            # Убираем дубликаты
             unique = {p['name'] + p['size']: p for p in products if len(p['name']) > 2}.values()
             return list(unique)
         except Exception as e:
@@ -68,6 +75,7 @@ async def get_full_stock():
 
 def save_to_csv(items):
     filename = "florisoft_price.csv"
+    if not items: return None
     keys = items[0].keys()
     with open(filename, 'w', newline='', encoding='utf-8-sig') as f:
         dict_writer = csv.DictWriter(f, fieldnames=keys)
@@ -78,27 +86,30 @@ def save_to_csv(items):
 def generate_pitch(item):
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"}
-    prompt = f"Сделай очень краткий оффер для профи: {item['name']}, {item['size']}, цена {item['price']}. Используй HTML <b>."
+    prompt = f"Краткий оффер: {item['name']}, {item['size']}, цена {item['price']}. Используй HTML <b>."
     try:
-        res = requests.post(url, json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "temperature": 0.5}, headers=headers, timeout=20)
+        res = requests.post(url, json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "temperature": 0.4}, headers=headers, timeout=20)
         return res.json()['choices'][0]['message']['content']
     except:
-        return f"🌿 <b>{item['name']}</b> ({item['size']}) — {item['price']}€"
+        return f"🌿 <b>{item['name']}</b> — {item['price']}€"
 
 async def main():
     items = await get_full_stock()
-    if not items: return
+    if not items:
+        logger.error("Товары не найдены или ошибка входа.")
+        return
 
-    # 1. Сохраняем полный прайс в файл
+    # Сохраняем файл
     csv_file = save_to_csv(items)
 
-    # 2. Выбираем 5 "горячих" товаров
+    # Выбираем 5 товаров
     hot_deals = random.sample(items, min(len(items), 5))
     
-    # 3. Отправляем 5 постов сразу
+    logger.info(f"Найдено {len(items)} товаров. Отправляю 5 предложений...")
+
     for item in hot_deals:
         pitch = generate_pitch(item)
-        caption = f"🔥 <b>TOP OFFER</b>\n\n{pitch}\n\n📍 В наличии: {item['stock']} шт."
+        caption = f"🔥 <b>ГОРЯЧЕЕ ПРЕДЛОЖЕНИЕ</b>\n\n{pitch}\n\n📍 В наличии: {item['stock']} шт."
         
         if item['photo'] and 'http' in item['photo']:
             requests.post(f"https://api.telegram.org/bot{TOKEN}/sendPhoto", 
@@ -107,11 +118,12 @@ async def main():
             requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", 
                           json={"chat_id": CHANNEL_ID, "text": caption, "parse_mode": "HTML"})
 
-    # 4. Отправляем файл с полным прайсом
-    with open(csv_file, 'rb') as f:
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendDocument", 
-                      data={"chat_id": CHANNEL_ID, "caption": "📄 Полный прайс-лист Florisoft (CSV/Excel)"},
-                      files={"document": f})
+    # Отправляем файл
+    if csv_file:
+        with open(csv_file, 'rb') as f:
+            requests.post(f"https://api.telegram.org/bot{TOKEN}/sendDocument", 
+                          data={"chat_id": CHANNEL_ID, "caption": f"📄 Полный прайс Florisoft\nВсего позиций: {len(items)}"},
+                          files={"document": f})
 
 if __name__ == "__main__":
     asyncio.run(main())
