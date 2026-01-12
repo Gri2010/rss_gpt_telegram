@@ -1,33 +1,31 @@
-name: Florisoft_Auto_Bot
+name: Hourly Plant Post
 
 on:
   schedule:
-    - cron: '0 */4 * * *'
-  workflow_dispatch: # Чтобы ты мог нажать кнопку Run Workflow
+    - cron: '0 * * * *' # Запуск каждый час (в 00 минут)
+  workflow_dispatch:      # Кнопка для ручного запуска
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
       - name: Install dependencies
         run: |
-          pip install requests playwright
-          playwright install chromium
-          playwright install-deps
+          python -m pip install --upgrade pip
+          pip install requests groq
 
-      - name: Run Bot
+      - name: Run bot
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          FLORI_USER: ${{ secrets.FLORI_USER }}
-          FLORI_PASS: ${{ secrets.FLORI_PASS }}
         run: python main.py
