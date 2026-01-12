@@ -19,8 +19,8 @@ async def download_full_price():
         page = await context.new_page()
         
         try:
-            # 1. Логин (проверенный путь)
-            logger.info("Захожу на сайт...")
+            # 1. Логин
+            logger.info("Захожу на Flowersale...")
             await page.goto("https://www.flowersale.nl/", wait_until="networkidle")
             await page.get_by_text("Login Webshop").first.click()
             
@@ -30,40 +30,41 @@ async def download_full_price():
             await page.click('button:has-text("INLOGGEN")')
             
             await asyncio.sleep(10)
-            await page.keyboard.press("Enter") # Склад
+            await page.keyboard.press("Enter") 
             await asyncio.sleep(5)
 
-            # 2. Жмем на ВКЛАДКУ "Горшечные" в верхнем меню
-            logger.info("Жму на верхнюю вкладку 'Горшечные'...")
-            # Ищем элемент li или a, который содержит текст "Горшечные" в навигации
-            await page.locator('nav, .navbar, .menu, .tabs').get_by_text("Горшечные").click()
-            await asyncio.sleep(7)
+            # 2. Жмем на вкладку PLANTEN (сверху)
+            logger.info("Жму на вкладку 'Planten'...")
+            # Ищем именно в верхней навигации
+            await page.locator('.nav-link, .menu-item, li').get_by_text("Planten", exact=True).first.click()
+            await asyncio.sleep(8)
 
-            # 3. Слева выбираем "Все группы"
-            logger.info("Выбираю 'Все группы' в боковом меню...")
-            await page.locator('.tree-node-content, .sidebar').get_by_text("Все группы").first.click()
+            # 3. Слева выбираем "Alle groepen"
+            logger.info("Выбираю 'Alle groepen'...")
+            # Используем фильтр по тексту в левой панели
+            await page.get_by_text("Alle groepen").first.click()
             await asyncio.sleep(5)
 
-            # 4. Скачивание через принтер
-            logger.info("Ищу кнопку принтера...")
+            # 4. Скачивание через иконку принтера
+            logger.info("Скачиваю прайс через иконку принтера...")
             async with page.expect_download() as download_info:
-                # Пробуем нажать на иконку принтера по классу или родителю
-                await page.locator('i.fa-print, .btn-print, [title*="print"]').first.click()
+                # В Florisoft иконка принтера часто сидит в кнопке с клазом .fa-print
+                await page.locator('.fa-print, [title*="print"], .btn-print').first.click()
             
             download = await download_info.value
-            file_path = f"./flowersale_price.pdf" # Обычно принтер отдает PDF или Excel
+            file_path = f"./{download.suggested_filename}"
             await download.save_as(file_path)
             
-            logger.info("Файл скачан!")
+            logger.info(f"Файл {file_path} успешно получен!")
             await browser.close()
             return file_path
 
         except Exception as e:
-            logger.error(f"Косяк на этапе: {e}")
-            await page.screenshot(path="step_error.png")
-            with open("step_error.png", "rb") as f:
+            logger.error(f"Затык: {e}")
+            await page.screenshot(path="debug_pl.png")
+            with open("debug_pl.png", "rb") as f:
                 requests.post(f"https://api.telegram.org/bot{TOKEN}/sendPhoto", 
-                              data={"chat_id": CHANNEL_ID, "caption": f"Василий, глянь скриншот. Застрял тут: {e}"}, files={"photo": f})
+                              data={"chat_id": CHANNEL_ID, "caption": f"Василий, не нашел Planten: {e}"}, files={"photo": f})
             await browser.close()
             return None
 
@@ -72,7 +73,7 @@ async def main():
     if price_file:
         with open(price_file, "rb") as f:
             requests.post(f"https://api.telegram.org/bot{TOKEN}/sendDocument", 
-                          data={"chat_id": CHANNEL_ID, "caption": "📄 Твой прайс готов!"}, files={"document": f})
+                          data={"chat_id": CHANNEL_ID, "caption": "📄 Прайс (Planten) обновлен!"}, files={"document": f})
         os.remove(price_file)
 
 if __name__ == "__main__":
