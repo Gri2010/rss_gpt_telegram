@@ -1,91 +1,78 @@
 import os
 import asyncio
-from playwright.async_api import async_playwright
 import requests
-import re
+import random
 import logging
+from groq import Groq
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Секреты
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 CHANNEL_ID = os.getenv('TELEGRAM_CHANNEL_ID')
-FLORI_USER = os.getenv('FLORI_USER')
-FLORI_PASS = os.getenv('FLORI_PASS')
+GROQ_KEY = os.getenv('GROQ_API_KEY')
 
-async def main():
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-        page = await context.new_page()
+client = Groq(api_key=GROQ_KEY)
 
-        try:
-            logger.info("Вход и получение данных...")
-            await page.goto("https://www.flowersale.nl/", wait_until="networkidle")
-            await page.get_by_text("Login Webshop").first.click()
-            await page.wait_for_selector('input[placeholder*="Gebruiker"]')
-            await page.fill('input[placeholder*="Gebruiker"]', str(FLORI_USER))
-            await page.fill('input[placeholder*="Wachtwoord"]', str(FLORI_PASS))
-            await page.click('button:has-text("INLOGGEN")')
-            await asyncio.sleep(12)
-            await page.keyboard.press("Enter")
-            await asyncio.sleep(5)
+# Список популярных растений для базы
+PLANTS = [
+    "Монстера деликатесная", "Фикус Лирата", "Сансевиерия", "Замиокулькас", 
+    "Стрелиция Николая", "Аглаонема", "Калатея Ората", "Эпипремнум золотистый",
+    "Пилея пеперомиевидная", "Алоказия Полли", "Хлорофитум", "Антуриум"
+]
 
-            # Переходим в раздел, чтобы куки активировались
-            await page.goto("https://flosal.florisoft-cloud.com/Voorraad/PLANT_/PLANT/ALL___")
-            await asyncio.sleep(5)
-            
-            # Делаем запрос (itemCount=50 для начала)
-            raw_html = await page.evaluate('''async () => {
-                const res = await fetch('https://flosal.florisoft-cloud.com/Voorraad/Section/items?itemCount=50&columnCount=1&Groep=PLANT_&Voorcod=PLANT&Celcod=ALL___');
-                return await res.text();
-            }''')
+def generate_plant_post(plant_name):
+    """Генерирует текст через Groq"""
+    try:
+        completion = client.chat.completions.create(
+            model="llama3-8b-8192",
+            messages=[
+                {"role": "system", "content": "Ты эксперт по комнатным растениям. Пиши краткие, полезные и вдохновляющие посты для Telegram. Используй эмодзи."},
+                {"role": "user", "content": f"Напиши пост про растение: {plant_name}. Укажи кратко: освещение, полив и одну интересную фишку."}
+            ],
+            temperature=0.7,
+        )
+        return completion.choices[0].message.content
+    except Exception as e:
+        logger.error(f"Ошибка Groq: {e}")
+        return f"🌿 <b>{plant_name}</b>\nПрекрасное растение для вашего дома! Скоро здесь будет описание ухода."
 
-            # --- ПАРСИНГ ПО ВЕРСТКЕ ---
-            # 1. Находим все блоки товаров (li)
-            # Мы будем искать названия, цены и ID для фото
-            titles = re.findall(r'<h5 class="title">([^<]+)</h5>', raw_html)
-            prices = re.findall(r'<span class="bedrag">([^<]+)</span>', raw_html)
-            vendors = re.findall(r'<span\s+class="kenmerk-waarde">([^<]+)</span>', raw_html)
-            
-            # Для фото ищем ID из тега li (например P391507041)
-            product_ids = re.findall(r'<li id="(P\d+)"', raw_html)
+def send_telegram_post(text, plant_name):
+    """Отправляет пост в канал с фото из интернета"""
+    # Поиск фото через бесплатный источник (Unsplash) или просто текст
+    photo_url = f"https://source.unsplash.com/featured/?{plant_name.replace(' ', ',')},plant"
+    
+    url = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
+    payload = {
+        "chat_id": CHANNEL_ID,
+        "caption": text,
+        "photo": photo_url,
+        "parse_mode": "HTML"
+    }
+    
+    try:
+        r = requests.post(url, json=payload)
+        if r.status_code != 200:
+            # Если фото не прошло, шлем просто текст
+            requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", 
+                          json={"chat_id": CHANNEL_ID, "text": text, "parse_mode": "HTML"})
+        logger.info(f"Пост про {plant_name} отправлен!")
+    except Exception as e:
+        logger.error(f"Ошибка отправки: {e}")
 
-            logger.info(f"Найдено названий: {len(titles)}, цен: {len(prices)}")
-
-            if titles:
-                count = min(5, len(titles))
-                for i in range(count):
-                    name = titles[i].strip()
-                    price = prices[i].strip() if i < len(prices) else "???"
-                    vendor = vendors[i].strip() if i < len(vendors) else "Не указан"
-                    
-                    # Формируем ссылку на фото, если нашли ID
-                    # Обычно у них путь такой: /Photos/GetPhoto?id=...
-                    photo_url = f"https://flosal.florisoft-cloud.com/Photos/GetPhoto?id={product_ids[i][1:]}" if i < len(product_ids) else None
-
-                    caption = (f"🌿 <b>{name}</b>\n\n"
-                               f"🏭 Поставщик: {vendor}\n"
-                               f"💰 Цена: {price}€\n"
-                               f"📍 Ссылка: <a href='https://flosal.florisoft-cloud.com/Voorraad/PLANT_/PLANT/ALL___'>В магазин</a>")
-
-                    # Пробуем отправить с фото, если нет - текстом
-                    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", 
-                                  json={"chat_id": CHANNEL_ID, "text": caption, "parse_mode": "HTML", "disable_web_page_preview": False})
-                    
-                    await asyncio.sleep(2)
-                
-                requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", 
-                              json={"chat_id": CHANNEL_ID, "text": f"✅ Обработка завершена. Всего в прайсе: {len(titles)} позиций."})
-            else:
-                logger.error("Не удалось извлечь данные. Проверь регулярки.")
-                requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", 
-                              json={"chat_id": CHANNEL_ID, "text": "⚠️ Ошибка парсинга: названия не найдены."})
-
-        except Exception as e:
-            logger.error(f"Сбой: {e}")
-        finally:
-            await browser.close()
+async def main_loop():
+    logger.info("Бот-энциклопедия запущен!")
+    while True:
+        plant = random.choice(PLANTS)
+        logger.info(f"Генерирую пост про {plant}...")
+        
+        post_text = generate_plant_post(plant)
+        send_telegram_post(post_text, plant)
+        
+        # Ждем 1 час (3600 секунд)
+        logger.info("Спим 1 час...")
+        await asyncio.sleep(3600)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main_loop())
