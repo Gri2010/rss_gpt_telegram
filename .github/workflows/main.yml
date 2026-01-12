@@ -1,36 +1,33 @@
-name: Flowersale_Bot_Parser
+name: Florisoft_Auto_Bot
 
 on:
   schedule:
-    # Запуск каждые 4 часа
     - cron: '0 */4 * * *'
-  workflow_dispatch: # Кнопка для ручного запуска
+  workflow_dispatch: # Чтобы ты мог нажать кнопку Run Workflow
 
 jobs:
-  run_bot:
+  build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Копируем файлы репозитория
+      - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Настраиваем Питон
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      - name: Устанавливаем библиотеки и браузер
+      - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
           pip install requests playwright
-          # Устанавливаем сам браузер и зависимости для него
           playwright install chromium
           playwright install-deps
 
-      - name: Запускаем бота
+      - name: Run Bot
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          FLORI_COOKIES: ${{ secrets.FLORI_COOKIES }}
+          FLORI_USER: ${{ secrets.FLORI_USER }}
+          FLORI_PASS: ${{ secrets.FLORI_PASS }}
         run: python main.py
