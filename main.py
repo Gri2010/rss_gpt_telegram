@@ -20,7 +20,7 @@ async def work_with_florisoft():
         page = await context.new_page()
         
         try:
-            logger.info("Вход в систему...")
+            logger.info("Авторизация...")
             await page.goto("https://www.flowersale.nl/", wait_until="networkidle")
             await page.get_by_text("Login Webshop").first.click()
             await page.wait_for_selector('input[placeholder*="Gebruiker"]')
@@ -31,12 +31,11 @@ async def work_with_florisoft():
             await page.keyboard.press("Enter") 
             await asyncio.sleep(5)
 
-            # Переход в Planten
-            logger.info("Переход в Planten...")
+            logger.info("Раздел Planten...")
             await page.goto("https://flosal.florisoft-cloud.com/Voorraad/PLANT_/PLANT/TP148")
-            await asyncio.sleep(10)
+            await asyncio.sleep(12)
 
-            # 1. Собираем данные для постов прямо из таблицы (пока открыта страница)
+            # 1. Собираем посты (это уже работало)
             products = await page.evaluate('''() => {
                 const results = [];
                 const rows = Array.from(document.querySelectorAll('tr')).filter(r => r.innerText.includes('€'));
@@ -55,54 +54,66 @@ async def work_with_florisoft():
                 return results;
             }''')
 
-            # 2. Жмем на принтер, чтобы вызвать окно "Печатная продукция"
-            logger.info("Вызываю окно печати...")
-            await page.locator('.fa-print').first.click()
-            await asyncio.sleep(5)
-
-            # 3. Жмем на кнопку EXCEL в появившемся окне
-            logger.info("Жму на кнопку EXCEL...")
+            # 2. ПРЯМОЙ ВЫЗОВ ОКНА (Без поиска иконки)
+            logger.info("Принудительный вызов окна EXCEL...")
             price_path = None
             try:
                 async with page.expect_download(timeout=60000) as download_info:
-                    # Ищем кнопку, которая содержит текст EXCEL (как на твоем скрине)
-                    await page.get_by_text("EXCEL").first.click()
+                    # Мы имитируем нажатие кнопки EXCEL через JavaScript, 
+                    # посылая событие сразу в систему Florisoft
+                    await page.evaluate('''() => {
+                        // Пытаемся найти кнопку EXCEL по тексту во всем документе
+                        const btns = Array.from(document.querySelectorAll('button, a, div, span'));
+                        const excel = btns.find(b => b.innerText && b.innerText.includes('EXCEL'));
+                        if (excel) {
+                            excel.click();
+                        } else {
+                            // Если окна еще нет, пробуем вызвать сам метод печати (часто это ExportToExcel)
+                            if (window.ExportToExcel) window.ExportToExcel();
+                            // Или просто жмем на иконку принтера через JS
+                            document.querySelector('.fa-print')?.parentElement?.click();
+                        }
+                    }''')
+                    
+                    # Если окно "Печатная продукция" появилось, жмем на EXCEL еще раз
+                    await asyncio.sleep(3)
+                    await page.evaluate('''() => {
+                        const excel = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('EXCEL'));
+                        if (excel) excel.click();
+                    }''')
                 
-                download = await download_download_info.value
-                price_path = f"./flowersale_price.xlsx"
+                download = await download_info.value
+                price_path = f"./price_list.xlsx"
                 await download.save_as(price_path)
-                logger.info("Файл Excel успешно получен!")
+                logger.info("Победа! Файл скачан.")
             except Exception as e:
-                logger.error(f"Не удалось нажать на EXCEL: {e}")
+                logger.warning(f"Excel не скачан, но посты сейчас отправим. Ошибка: {e}")
 
             await browser.close()
             return products, price_path
 
         except Exception as e:
-            logger.error(f"Общий сбой: {e}")
+            logger.error(f"Ошибка: {e}")
             await browser.close()
             return [], None
 
 async def main():
     items, price_file = await work_with_florisoft()
     
-    # Сначала отправляем посты
+    # 1. Шлем посты
     if items:
         selected = random.sample(items, min(len(items), 5))
         for item in selected:
-            msg = f"🌿 <b>{item['name']}</b>\n📏 {item['size']}\n💰 {item['price']}€\n📦 Склад: {item['stock']}"
-            if item['photo'] and 'http' in item['photo']:
-                requests.post(f"https://api.telegram.org/bot{TOKEN}/sendPhoto", json={"chat_id": CHANNEL_ID, "photo": item['photo'], "caption": msg, "parse_mode": "HTML"})
-            else:
-                requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHANNEL_ID, "text": msg, "parse_mode": "HTML"})
+            msg = f"🌿 <b>{item['name']}</b>\n📏 {item['size']}\n💰 {item['price']}€\n📦 {item['stock']} шт."
+            requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", 
+                          json={"chat_id": CHANNEL_ID, "text": msg, "parse_mode": "HTML"})
             await asyncio.sleep(2)
 
-    # Затем отправляем файл Excel
+    # 2. Шлем файл
     if price_file:
         with open(price_file, "rb") as f:
             requests.post(f"https://api.telegram.org/bot{TOKEN}/sendDocument", 
-                          data={"chat_id": CHANNEL_ID, "caption": "📊 Полный прайс-лист (Excel)"}, files={"document": f})
-        os.remove(price_file)
+                          data={"chat_id": CHANNEL_ID, "caption": "📊 Прайс Planten"}, files={"document": f})
 
 if __name__ == "__main__":
     asyncio.run(main())
