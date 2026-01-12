@@ -17,17 +17,24 @@ CHANNEL_ID = os.getenv('TELEGRAM_CHANNEL_ID')
 GROQ_KEY = os.getenv('GROQ_API_KEY')
 
 def get_random_plant_id():
-    """Ищет случайное растение через API POWO"""
+    """Ищет случайное растение через API POWO с имитацией браузера"""
     seeds = ["sub", "fl", "bi", "tri", "mon", "per", "gra", "ros", "al", "phy", "oxy", "mega"]
     query = random.choice(seeds)
     
-    url = f"http://powo.science.kew.org/api/2/search?q={query}&perPage=50"
+    # Добавляем заголовки, чтобы сервер думал, что заходит обычный человек через Chrome
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json"
+    }
+    
+    url = f"https://powo.science.kew.org/api/2/search?q={query}&perPage=50"
+    
     try:
-        r = requests.get(url, timeout=15)
+        r = requests.get(url, headers=headers, timeout=15)
         r.raise_for_status()
         data = r.json()
         if data.get('results'):
-            # Фильтруем только принятые научные названия (accepted)
+            # Фильтруем принятые названия
             valid_plants = [p for p in data['results'] if p.get('accepted')]
             return random.choice(valid_plants) if valid_plants else data['results'][0]
     except Exception as e:
@@ -64,7 +71,7 @@ def analyze_with_ai(plant_data):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content}
         ],
-        "temperature": 0.3 # Снизил температуру для точности (меньше креатива)
+        "temperature": 0.3
     }
     
     try:
@@ -75,11 +82,11 @@ def analyze_with_ai(plant_data):
         return f"Новый объект в базе: <b>{name}</b> (Семейство: {family})."
 
 def run_bot():
-    logger.info("🌿 Поиск реальных данных в архивах Kew Gardens...")
+    logger.info("🌿 Поиск реальных данных в архивах Kew Gardens (с обходом блокировки)...")
     
     plant = get_random_plant_id()
     if not plant:
-        logger.error("Не удалось получить данные от POWO API")
+        logger.error("Не удалось получить данные от POWO API (вероятно, блокировка по IP или User-Agent)")
         return
 
     ai_text = analyze_with_ai(plant)
@@ -105,7 +112,7 @@ def run_bot():
             "disable_web_page_preview": False
         })
         if res.status_code == 200:
-            logger.info(f"✅ Данные о {plant.get('name')} отправлены.")
+            logger.info(f"✅ Данные о {plant.get('name')} успешно опубликованы.")
         else:
             logger.error(f"Ошибка ТГ: {res.text}")
     except Exception as e:
