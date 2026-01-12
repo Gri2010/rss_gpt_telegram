@@ -21,7 +21,6 @@ async def work_with_florisoft():
         page = await context.new_page()
         
         try:
-            # 1. Логин
             logger.info("Вход в систему...")
             await page.goto("https://www.flowersale.nl/", wait_until="networkidle")
             await page.get_by_text("Login Webshop").first.click()
@@ -33,17 +32,17 @@ async def work_with_florisoft():
             await page.keyboard.press("Enter") 
             await asyncio.sleep(5)
 
-            # 2. Переход в Planten
-            logger.info("Переход в Planten...")
+            logger.info("Переход в раздел...")
             await page.goto("https://flosal.florisoft-cloud.com/Voorraad/PLANT_/PLANT/TP148")
-            await asyncio.sleep(12)
+            # Ждем, пока таблица и зеленая полоса точно появятся
+            await page.wait_for_selector('tr', timeout=30000)
+            await asyncio.sleep(10)
 
-            # --- ЧАСТЬ 1: Собираем данные для 5 постов ---
-            logger.info("Парсим товары для постов...")
+            # --- ЧАСТЬ 1: Собираем данные для постов ---
             products = await page.evaluate('''() => {
                 const results = [];
                 const rows = Array.from(document.querySelectorAll('tr')).filter(r => r.innerText.includes('€'));
-                rows.slice(0, 50).forEach(row => { // Берем первые 50 для выбора
+                rows.slice(0, 40).forEach(row => {
                     const cells = row.querySelectorAll('td');
                     if (cells.length >= 5) {
                         results.push({
@@ -58,11 +57,21 @@ async def work_with_florisoft():
                 return results;
             }''')
 
-            # --- ЧАСТЬ 2: Скачиваем полный прайс через принтер ---
-            logger.info("Нажимаю на принтер на зеленой полосе...")
+            # --- ЧАСТЬ 2: Жмем на принтер через JS (самый надежный метод) ---
+            logger.info("Пытаюсь нажать на принтер через JS...")
+            
             async with page.expect_download(timeout=60000) as download_info:
-                # Целимся в иконку принтера на зеленой панели
-                await page.locator('.fa-print').first.click()
+                # Этот скрипт найдет иконку принтера и принудительно кликнет по её родителю (кнопке)
+                await page.evaluate('''() => {
+                    const printIcon = document.querySelector('.fa-print');
+                    if (printIcon) {
+                        printIcon.closest('button').click();
+                    } else {
+                        // Если нет класса .fa-print, ищем по атрибуту title (часто там написано Print)
+                        const printBtn = document.querySelector('[title*="Print"], [title*="print"]');
+                        if (printBtn) printBtn.click();
+                    }
+                }''')
             
             download = await download_info.value
             price_path = f"./{download.suggested_filename}"
@@ -73,44 +82,12 @@ async def work_with_florisoft():
 
         except Exception as e:
             logger.error(f"Ошибка: {e}")
-            await page.screenshot(path="error.png")
-            with open("error.png", "rb") as f:
+            await page.screenshot(path="error_report.png")
+            with open("error_report.png", "rb") as f:
                 requests.post(f"https://api.telegram.org/bot{TOKEN}/sendPhoto", 
-                              data={"chat_id": CHANNEL_ID, "caption": f"Ошибка: {e}"}, files={"photo": f})
+                              data={"chat_id": CHANNEL_ID, "caption": f"Василий, опять принтер не видит. Ошибка: {e}"}, files={"photo": f})
             await browser.close()
             return [], None
 
-def generate_pitch(item):
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"}
-    prompt = f"Напиши 1 короткое продающее предложение для растения: {item['name']}, размер {item['size']}, цена {item['price']}. Используй HTML <b>."
-    try:
-        res = requests.post(url, json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}]}, headers=headers, timeout=20)
-        return res.json()['choices'][0]['message']['content']
-    except:
-        return f"🌿 <b>{item['name']}</b> ({item['size']}) — {item['price']}€"
-
-async def main():
-    items, price_file = await work_with_florisoft()
-    
-    # 1. Отправляем 5 постов
-    if items:
-        hot_deals = random.sample(items, min(len(items), 5))
-        for item in hot_deals:
-            pitch = generate_pitch(item)
-            caption = f"🔥 <b>ПРЕДЛОЖЕНИЕ ДНЯ</b>\n\n{pitch}\n\n📦 В наличии: {item['stock']}"
-            if item['photo'] and 'http' in item['photo']:
-                requests.post(f"https://api.telegram.org/bot{TOKEN}/sendPhoto", json={"chat_id": CHANNEL_ID, "photo": item['photo'], "caption": caption, "parse_mode": "HTML"})
-            else:
-                requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHANNEL_ID, "text": caption, "parse_mode": "HTML"})
-            await asyncio.sleep(2)
-
-    # 2. Отправляем файл
-    if price_file:
-        with open(price_file, "rb") as f:
-            requests.post(f"https://api.telegram.org/bot{TOKEN}/sendDocument", 
-                          data={"chat_id": CHANNEL_ID, "caption": "📄 Полный прайс скачан через систему."}, files={"document": f})
-        os.remove(price_file)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+# Функции generate_pitch и main остаются такими же, как в прошлом сообщении
+# (Не забудь их оставить в коде!)
