@@ -5,45 +5,43 @@ import random
 import logging
 from groq import Groq
 
-# Логирование для отладки в GitHub Actions
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Секреты
 groq_client = Groq(api_key=os.getenv('GROQ_API_KEY'))
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 CHANNEL_ID = os.getenv('TELEGRAM_CHANNEL_ID')
 
-# Проверенная база: Название растения и прямая ссылка на качественное фото (Wikipedia/Static)
+# Проверенный список: Название - Прямая ссылка
 PLANT_DATA = {
-    "Monstera deliciosa": "https://upload.wikimedia.org/wikipedia/commons/thumb/0/04/Starr_080731-9572_Monstera_deliciosa.jpg/800px-Starr_080731-9572_Monstera_deliciosa.jpg",
+    "Monstera deliciosa": "https://upload.wikimedia.org/wikipedia/commons/0/04/Starr_080731-9572_Monstera_deliciosa.jpg",
     "Alocasia baginda": "https://upload.wikimedia.org/wikipedia/commons/e/e8/Alocasia_baginda_Dragon_Scale.jpg",
-    "Anthurium clarinervium": "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0c/Anthurium_clarinervium_1.jpg/800px-Anthurium_clarinervium_1.jpg",
-    "Ficus lyrata": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/83/Ficus_lyrata_leaves_01.JPG/800px-Ficus_lyrata_leaves_01.JPG",
-    "Monstera adansonii": "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1e/Monstera_adansonii_Lesser_Antilles.jpg/800px-Monstera_adansonii_Lesser_Antilles.jpg",
-    "Strelitzia nicolai": "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a2/Strelitzia_nicolai_01.JPG/800px-Strelitzia_nicolai_01.JPG",
-    "Zamioculcas zamiifolia": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c2/Zamioculcas_zamiifolia_Garten-Zamioculcas.jpg/800px-Zamioculcas_zamiifolia_Garten-Zamioculcas.jpg",
-    "Philodendron gloriosum": "https://upload.wikimedia.org/wikipedia/commons/thumb/b/ba/Philodendron_gloriosum_1.jpg/800px-Philodendron_gloriosum_1.jpg"
+    "Anthurium clarinervium": "https://upload.wikimedia.org/wikipedia/commons/0/0c/Anthurium_clarinervium_1.jpg",
+    "Ficus lyrata": "https://upload.wikimedia.org/wikipedia/commons/8/83/Ficus_lyrata_leaves_01.JPG",
+    "Monstera adansonii": "https://upload.wikimedia.org/wikipedia/commons/1/1e/Monstera_adansonii_Lesser_Antilles.jpg",
+    "Strelitzia nicolai": "https://upload.wikimedia.org/wikipedia/commons/a/a2/Strelitzia_nicolai_01.JPG",
+    "Zamioculcas zamiifolia": "https://upload.wikimedia.org/wikipedia/commons/c/c2/Zamioculcas_zamiifolia_Garten-Zamioculcas.jpg",
+    "Philodendron gloriosum": "https://upload.wikimedia.org/wikipedia/commons/b/ba/Philodendron_gloriosum_1.jpg"
 }
 
 def generate_expert_post(plant_name):
-    """Генерация строгого научного текста через Groq"""
     try:
+        # Просим нейронку использовать HTML теги вместо Markdown
         prompt = f"""
-        Используй строгие данные Kew Gardens и базы POWO. 
-        Напиши ботаническую справку про {plant_name}.
+        Используй данные Kew Gardens и POWO. Напиши научную справку про {plant_name}.
+        Используй ТОЛЬКО эти HTML теги: <b>...</b> для жирного, <i>...</i> для курсива.
         
-        Обязательно включи:
-        1. 🏛 Научная классификация (Латынь, Семейство).
-        2. 🌍 География (Native Range по POWO).
-        3. 🪴 Культивация (Субстрат, свет, влажность по стандартам оранжерей).
-        4. 🛡 Патологии (Болезни и вредители).
+        Структура:
+        <b>🏛 Научная классификация</b>
+        <b>🌍 География (Native Range)</b>
+        <b>🪴 Культивация (Kew Standard)</b>
+        <b>🛡 Патологии</b>
         
-        Тон: Научный, сухой. Язык: Русский. Используй Markdown для заголовков.
+        Тон: Научный, сухой. Язык: Русский.
         """
         completion = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": "Ты — цифровой архив Kew Gardens. Выдаешь только факты без воды."},
+            messages=[{"role": "system", "content": "Ты — архив Kew Gardens. Выдаешь данные в HTML формате (b, i)."},
                       {"role": "user", "content": prompt}],
             temperature=0.1
         )
@@ -53,37 +51,32 @@ def generate_expert_post(plant_name):
         return None
 
 def send_to_telegram(text, photo_url):
-    """Отправка поста с фото в Telegram"""
     url = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
     payload = {
         "chat_id": CHANNEL_ID,
         "caption": text[:1024], 
         "photo": photo_url,
-        "parse_mode": "Markdown"
+        "parse_mode": "HTML" # Заменили на HTML для стабильности
     }
     
     try:
         r = requests.post(url, json=payload)
         if r.status_code != 200:
-            logger.error(f"Telegram API Error: {r.text}")
-            # Если фото не проходит, отправляем хотя бы текст
+            logger.error(f"Ошибка ТГ: {r.text}")
+            # Если фото не прошло, пробуем отправить хотя бы текст
             requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", 
-                          json={"chat_id": CHANNEL_ID, "text": text, "parse_mode": "Markdown"})
+                          json={"chat_id": CHANNEL_ID, "text": text, "parse_mode": "HTML"})
         else:
-            logger.info("Пост успешно отправлен!")
+            logger.info("Пост с фото улетел!")
     except Exception as e:
-        logger.error(f"Network Error: {e}")
+        logger.error(f"Ошибка: {e}")
 
 async def main():
-    # Выбираем случайное растение из базы
     plant_name, photo_url = random.choice(list(PLANT_DATA.items()))
-    logger.info(f"Начинаю работу над: {plant_name}")
-    
+    logger.info(f"Запуск: {plant_name}")
     final_post = generate_expert_post(plant_name)
     if final_post:
         send_to_telegram(final_post, photo_url)
-    else:
-        logger.error("Не удалось сгенерировать текст.")
 
 if __name__ == "__main__":
     asyncio.run(main())
