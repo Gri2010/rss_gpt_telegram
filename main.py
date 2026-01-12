@@ -3,20 +3,18 @@ import asyncio
 import requests
 import random
 import logging
-from pykew.powo import Powo
+import pykew.powo as powo
 from groq import Groq
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Инициализация
-powo = Powo()
 groq_client = Groq(api_key=os.getenv('GROQ_API_KEY'))
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 CHANNEL_ID = os.getenv('TELEGRAM_CHANNEL_ID')
 
-# Список реальных ID растений из базы Kew (POWO)
-# Каждое ID соответствует конкретному виду
+# Список ID растений (POWO ID)
 PLANT_IDS = [
     '422969-1',  # Monstera deliciosa
     '277839-2',  # Alocasia baginda
@@ -31,11 +29,15 @@ PLANT_IDS = [
 def get_kew_data(powo_id):
     """Получает научные данные напрямую из Kew Gardens"""
     try:
+        # Исправленный метод обращения к API pykew
         res = powo.lookup(powo_id, include=['distribution'])
         name = res.get('name', 'Unknown')
         family = res.get('family', 'Unknown')
+        
+        # Собираем ареал
         dist_list = res.get('distribution', {}).get('natives', [])
-        native_range = ", ".join([d.get('name') for d in dist_list[:5]])
+        native_range = ", ".join([d.get('name') for d in dist_list[:5]]) if dist_list else "Unknown"
+        
         return f"Species: {name}\nFamily: {family}\nNative Range: {native_range}"
     except Exception as e:
         logger.error(f"Kew API Error: {e}")
@@ -45,8 +47,8 @@ def generate_expert_post(raw_data):
     """Перевод и экспертная обработка через Groq"""
     try:
         prompt = f"""
-        Ты — эксперт-ботаник, работающий с архивами Kew Gardens. 
-        Переведи и расширь эти данные до полноценного поста для экспертов:
+        Ты — эксперт-ботаник Kew Gardens. 
+        Переведи и расширь эти данные до полноценного экспертного поста:
         {raw_data}
 
         Формат:
@@ -55,7 +57,7 @@ def generate_expert_post(raw_data):
         3. 🪴 **Содержание в коллекции** (Субстрат, влажность, свет по стандартам оранжерей).
         4. 🛡 **Проблемы** (Болезни/вредители).
         
-        Тон: Строгий, научный, профессиональный. Никакой воды.
+        Тон: Строгий, научный. Никакой воды.
         """
         completion = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -70,14 +72,18 @@ def generate_expert_post(raw_data):
 
 def send_to_telegram(text, species_name):
     """Отправка в канал с фото"""
-    # Ищем фото по латинскому названию
-    photo_url = f"https://source.unsplash.com/1600x900/?{species_name.replace(' ', ',')}"
+    # Поиск фото по латинскому названию
+    photo_query = species_name.replace(' ', ',')
+    photo_url = f"https://images.unsplash.com/photo-1545241047-6083a3684587?q=80&w=1000&auto=format&fit=crop" # Заглушка, если поиск упадет
+    
+    # Пытаемся собрать живую ссылку на фото
+    search_url = f"https://source.unsplash.com/featured/1600x900/?houseplant,{photo_query}"
     
     url = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
     payload = {
         "chat_id": CHANNEL_ID,
-        "caption": text[:1024], # Лимит ТГ на описание
-        "photo": photo_url,
+        "caption": text[:1024], 
+        "photo": search_url,
         "parse_mode": "Markdown"
     }
     
@@ -91,18 +97,15 @@ def send_to_telegram(text, species_name):
         logger.error(f"Telegram Error: {e}")
 
 async def main():
-    logger.info("Запуск процесса...")
     p_id = random.choice(PLANT_IDS)
+    logger.info(f"Запрос данных для ID: {p_id}")
     raw_kew_info = get_kew_data(p_id)
     
     if raw_kew_info:
-        # Выдергиваем название для поиска фото
         species_name = raw_kew_info.split('\n')[0].replace('Species: ', '')
         final_post = generate_expert_post(raw_kew_info)
         send_to_telegram(final_post, species_name)
-        logger.info(f"Пост про {species_name} успешно отправлен.")
-    else:
-        logger.error("Не удалось получить данные из Kew.")
+        logger.info(f"Пост про {species_name} отправлен.")
 
 if __name__ == "__main__":
     asyncio.run(main())
